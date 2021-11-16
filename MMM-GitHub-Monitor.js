@@ -3,6 +3,7 @@ Module.register('MMM-GitHub-Monitor', {
     updateInterval: 1000 * 60 * 10,
     renderInterval: 1000 * 5,
     maxPullRequestTitleLength: 100,
+    maxIssueTitleLength: 100,
     repositories: [
       {
         owner: 'fpfuetsch',
@@ -14,6 +15,14 @@ Module.register('MMM-GitHub-Monitor', {
           state: 'open',
           head: '',
           base: 'main',
+          sort: 'created',
+          direction: 'desc',
+        },
+        issues: {
+          display: true,
+          loadCount: 10,
+          displayCount: 2,
+          state: 'open',
           sort: 'created',
           direction: 'desc',
         }
@@ -94,6 +103,41 @@ Module.register('MMM-GitHub-Monitor', {
             repoData.pulls = jsonPulls;
           }
         }
+
+        if (repo.issues && repo.issues.display) {
+          const issuesConfig = {
+            state: repo.issues.state || 'open',
+            sort: repo.issues.sort || 'created',
+            direction: repo.issues.direction || 'desc',
+          }
+          let params = [];
+          Object.keys(issuesConfig).forEach(key => {
+            if (issuesConfig[key]) {
+              params.push(`${key}=${issuesConfig[key]}`)
+            }
+          });
+          const resIssues = await fetch(`https://api.github.com/repos/${repo.owner}/${repo.name}/issues?${params.join('&')}`)
+          if (resIssues.ok) {
+            let jsonIssues = await resIssues.json();
+            for (var i = jsonIssues.length - 1; i >= 0; i--) {
+              if (jsonIssues[i].hasOwnProperty('pull_request')) {
+                jsonIssues.splice(i, 1);
+              }
+            }
+            if (repo.issues.loadCount) {
+              jsonIssues = jsonIssues.slice(0, repo.issues.loadCount);
+            }
+            if (this.config.maxIssueTitleLength) {
+              jsonIssues.forEach(issue => {
+                if (issue.title.length > this.config.maxIssueTitleLength) {
+                  issue.title = issue.title.substr(0, this.config.maxIssueTitleLength) + '...';
+                }
+              })
+            }
+            repoData.step = Math.min(repo.issues.displayCount, jsonIssues.length);
+            repoData.issues = jsonIssues;
+          }
+        }        
         this.ghData.push(repoData)
       }
     }
@@ -146,6 +190,27 @@ Module.register('MMM-GitHub-Monitor', {
           pullEntry.innerText = `#${pull.number} ${pull.title}`;
           pullRow.append(pullEntry);
           table.append(pullRow);
+        });
+      }
+      if (repo.issues) {
+        const displayedIssues = [];
+        for (let i = 0; i < repo.step; i++) {
+          if (this.state[repo.id] + 1 < repo.issues.length) {
+            displayedIssues.push(repo.issues[this.state[repo.id] + 1])
+            this.state[repo.id]++;
+          } else {
+            displayedIssues.push(repo.issues[0])
+            this.state[repo.id] = 0;
+          }
+        }
+        displayedIssues.forEach(issue => {
+          const issueRow = document.createElement('tr');
+          const issueEntry = document.createElement('td');
+          issueEntry.style.paddingLeft = '1em';
+          issueEntry.colSpan = 3;
+          issueEntry.innerText = `#${issue.number} ${issue.title}`;
+          issueRow.append(issueEntry);
+          table.append(issueRow);
         });
       }
     })
